@@ -1,32 +1,39 @@
-FROM pytorch/pytorch:1.5-cuda10.1-cudnn7-devel
+FROM nvidia/cuda:10.2-cudnn8-devel-ubuntu18.04
 
-RUN apt-get update
+SHELL ["/bin/bash", "-c"]
 
-RUN apt-get install -y openssh-server
-RUN mkdir /var/run/sshd
-RUN echo 'root:22861238' | chpasswd
-RUN sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-RUN sed -i 's/PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-RUN sed -i 's/#Port 22/Port 20022/' /etc/ssh/sshd_config
+ENV PYTHON_VERSION 3.7.6
+ENV HOME /root
+ENV PYTHON_ROOT $HOME/local/python-$PYTHON_VERSION
+ENV PATH $PYTHON_ROOT/bin:$PATH
+ENV PYENV_ROOT $HOME/.pyenv
+# for skip timezone selecting
+ENV DEBIAN_FRONTEND=noninteractive
 
-# SSH login fix. Otherwise user is kicked off after login
-RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
+# install python
+RUN apt-get update && apt-get upgrade -y \
+ && apt-get install -y \
+    git \
+    make \
+    build-essential \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    wget \
+    curl \
+    llvm \
+    libncurses5-dev \
+    libncursesw5-dev \
+    xz-utils \
+    tk-dev \
+    libffi-dev \
+    liblzma-dev \
+ && git clone https://github.com/pyenv/pyenv.git $PYENV_ROOT \
+ && $PYENV_ROOT/plugins/python-build/install.sh \
+ && /usr/local/bin/python-build -v $PYTHON_VERSION $PYTHON_ROOT \
+ && rm -rf $PYENV_ROOT
 
-EXPOSE 20022
-CMD ["/usr/sbin/sshd", "-D"]
-
-RUN apt-get install -y unzip
-
-# update pip
 RUN pip install --upgrade pip setuptools wheel
-# remove conda
-RUN pip uninstall -y $(pip list | grep conda)
-
-# intall kaggle api
-COPY ./kaggle.json /root/.kaggle/kaggle.json
-RUN chmod 600 /root/.kaggle/kaggle.json
-RUN pip install kaggle
-
-# install requirements
-COPY ./requirements.txt /workspace/requirements.txt
-RUN pip install -r requirements.txt
+RUN pip install torch torchvision
