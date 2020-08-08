@@ -36,4 +36,19 @@ RUN apt-get update && apt-get upgrade -y \
  && rm -rf $PYENV_ROOT
 
 RUN pip install --upgrade pip setuptools wheel
+
+# pytorch
 RUN pip install torch torchvision
+# lightgbm
+RUN apt-get install -y cmake
+RUN git clone --recursive https://github.com/microsoft/LightGBM /root/LightGBM
+RUN mkdir /root/LightGBM/build
+WORKDIR /root/LightGBM/build/
+RUN cmake ..
+RUN make -j4
+WORKDIR /root/LightGBM/python-package
+RUN pip install -e .
+WORKDIR /
+# requirements
+COPY ./requirements.txt /workspace/requirements.txt
+RUN pip install -r /workspace/requirements.txt
