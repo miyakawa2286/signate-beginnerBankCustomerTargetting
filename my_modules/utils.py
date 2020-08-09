@@ -3,6 +3,8 @@ import os
 import pandas as pd 
 import numpy as np
 
+TARGET = 'y'
+
 
 def reduce_mem_usage(df):
     """ iterate through all the columns of a dataframe and modify the data type
@@ -50,6 +52,14 @@ def read_dataset(dpath_to_dataset):
                                        header=None,
                                        ))
     return train,test,sub
+
+
+def make_submission(base_df,pred,dpath_to_output):
+    base_df[1] = pred
+    base_df.to_csv(os.path.join(dpath_to_output,'my_pred.csv'),
+                   index=False,
+                   header=None,
+                   )
 
 
 if __name__=='__main__':
