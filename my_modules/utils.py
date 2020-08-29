@@ -6,6 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 TARGET = 'y'
+IGNORE_FEATURES = ['default']
+LOCAL_TRAIN_RATIO = 0.75
 
 
 def reduce_mem_usage(df):
