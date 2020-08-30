@@ -1,9 +1,13 @@
+import os
 import sys
+import pickle
+import glob
 
 import pandas as pd 
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 from sklearn import metrics
+from sklearn.linear_model import LogisticRegression
 import lightgbm as lgb
 
 sys.path.append('./my_modules/')
@@ -37,16 +41,16 @@ def my_lgb_cross_validation(params,
     for i, (cv_train_index, cv_test_index) in enumerate(skf.split(train[features],train[target])):
         # set seed
         np.random.seed(i)
-        # split data
+        # split data into cv train and test
         cv_train = train.iloc[cv_train_index]
+        cv_test = train.iloc[cv_test_index]
+        # split cv train into local train and val
         # local train used for training
         # local val used for early stopping
         local_train_size = int(len(cv_train_index)*LOCAL_TRAIN_RATIO)
         local_train_index = np.random.choice(cv_train_index,local_train_size,replace=False)
         local_train = cv_train.iloc[cv_train.index.isin(local_train_index)]
         local_val = cv_train.iloc[~cv_train.index.isin(local_train_index)]
-        # cv_test used for evaluation
-        cv_test = train.iloc[cv_test_index]
         # make dataset
         lgb_train = lgb.Dataset(local_train[features], local_train[target])
         lgb_val = lgb.Dataset(local_val[features], local_val[target])
@@ -81,5 +85,39 @@ def my_lgb_cross_validation(params,
         'feature_importance': feature_importance_df,
         'learning_history': learning_history,
         'models': models,
+    }
+    return res
+
+
+def agg_cv_models(train,
+                  test,
+                  features,
+                  target,
+                  dpath_to_models,
+                  ):
+    # iterate over cv models
+    cv_model_names = []
+    for fpath_to_model in glob.glob(os.path.join(dpath_to_models,'*')):
+        print(fpath_to_model)
+        # load model
+        with open(fpath_to_model,'rb') as rb:
+            model = pickle.load(rb)
+            cv_model_name = fpath_to_model.split('/')[-1].split('.')[0]
+            cv_model_names.append(cv_model_name)
+        # get train prediction
+        train[cv_model_name] = model.predict(train[features], num_iteration=model.best_iteration)
+        # get test prediction
+        test[cv_model_name] = model.predict(test[features], num_iteration=model.best_iteration)
+    
+    # fit meta model
+    meta_model = LogisticRegression(class_weight='balanced',random_state=2020)
+    meta_model.fit(train[cv_model_names],train[target])
+    # get agg prediction
+    agg_pred = meta_model.predict(test[cv_model_names])
+
+    res = {
+        'agg_pred': agg_pred,
+        'cv_model_pred_train': train[cv_model_names],
+        'cv_model_pred_test': test[cv_model_names],
     }
     return res

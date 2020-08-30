@@ -46,15 +46,16 @@ cv_res['feature_importance'].to_csv(os.path.join(dpath_to_output,'feature_import
 with open(os.path.join(dpath_to_output,'learning_history.pkl'),'wb') as wb:
     pickle.dump(cv_res['learning_history'],wb)
 for cv_i,model in cv_res['models'].items():
-    with open(os.path.join(dpath_to_output,f'model_{cv_i}.pkl'),'wb') as wb:
+    with open(os.path.join(dpath_to_output,'cv_models',f'model_{cv_i}.pkl'),'wb') as wb:
         pickle.dump(model,wb)
 
 # make submission
-# make dataset
+# make local train and val
 local_train_size = int(train.shape[0]*LOCAL_TRAIN_RATIO)
 local_train_index = np.random.choice(train.index,local_train_size,replace=False)
 local_train = train.iloc[train.index.isin(local_train_index)]
 local_val = train.iloc[~train.index.isin(local_train_index)]
+# make dataset
 lgb_train = lgb.Dataset(local_train[features], local_train[TARGET])
 lgb_val = lgb.Dataset(local_val[features], local_val[TARGET])
 # train

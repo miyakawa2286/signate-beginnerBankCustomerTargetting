@@ -10,7 +10,7 @@ IGNORE_FEATURES = ['default']
 LOCAL_TRAIN_RATIO = 0.75
 
 
-def reduce_mem_usage(df):
+def reduce_mem_usage(df, verbose=False):
     """ iterate through all the columns of a dataframe and modify the data type
         to reduce memory usage.        
     """
@@ -43,8 +43,9 @@ def reduce_mem_usage(df):
             df[col] = df[col].astype('category')
 
     end_mem = df.memory_usage().sum() / 1024**2
-    print('Memory usage after optimization is: {:.2f} MB'.format(end_mem))
-    print('Decreased by {:.1f}%'.format(100 * (start_mem - end_mem) / start_mem))
+    if verbose:
+        print('Memory usage after optimization is: {:.2f} MB'.format(end_mem))
+        print('Decreased by {:.1f}%'.format(100 * (start_mem - end_mem) / start_mem))
     
     return df
 
@@ -58,9 +59,10 @@ def read_dataset(dpath_to_dataset):
     return train,test,sub
 
 
-def make_submission(base_df,pred,dpath_to_output):
+def make_submission(base_df,pred,dpath_to_output,filename=None):
     base_df[1] = pred
-    base_df.to_csv(os.path.join(dpath_to_output,'my_pred.csv'),
+    filename = 'my_pred.csv' if filename is None else filename
+    base_df.to_csv(os.path.join(dpath_to_output,filename),
                    index=False,
                    header=None,
                    )
