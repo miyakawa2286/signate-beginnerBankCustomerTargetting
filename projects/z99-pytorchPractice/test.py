@@ -18,6 +18,8 @@ sys.path.append('./my_modules/')
 from utils import TARGET
 from utils import read_dataset
 
+CLEAN_LOG = True
+
 
 class MyNormalizer:
     '''
@@ -63,14 +65,17 @@ class Net(nn.Module):
     def __init__(self,inp_size,out_size):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(inp_size, 32)
+        self.bn1 = nn.BatchNorm1d(32)
         self.fc2 = nn.Linear(32, 16)
+        self.bn2 = nn.BatchNorm1d(16)
         self.fc3 = nn.Linear(16, 8)
+        self.bn3 = nn.BatchNorm1d(8)
         self.fc4 = nn.Linear(8, out_size)
     
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        x = self.bn1(F.relu(self.fc1(x)))
+        x = self.bn2(F.relu(self.fc2(x)))
+        x = self.bn3(F.relu(self.fc3(x)))
         x = torch.sigmoid(self.fc4(x))
         return x
 
@@ -106,13 +111,13 @@ train_dataset = MyDataset(X_train, y_train.to_list(), transform=nl)
 val_dataset = MyDataset(X_val, y_val.to_list(), transform=nl)
 train_dataloader = DataLoader(
     train_dataset, 
-    batch_size=32,
+    batch_size=64,
     shuffle=True,
     num_workers=0,
     )
 val_dataloader = DataLoader(
     val_dataset, 
-    batch_size=32,
+    batch_size=64,
     shuffle=True,
     num_workers=0,
     )
@@ -125,14 +130,26 @@ optimizer = optim.SGD(net.parameters(), lr=0.01)
 criterion = nn.BCELoss()
 
 # tensorboard log writer
-writer = SummaryWriter(log_dir="./projects/z99-pytorchPractice/logs/")
-
+dpath_to_logs = './projects/z99-pytorchPractice/logs/'
+if CLEAN_LOG:
+    for sdir,_,files in os.walk(dpath_to_logs):
+        if files:
+            for f in files:
+                os.remove(os.path.join(sdir,f))
+train_loss_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'train-loss'))
+val_loss_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'val-loss'))
 # define training parameters
-epoch_size = 10
-
+epoch_size = 25
+print_step = 10
+#validation_step = int(len(train_dataloader)*0.1)
+# iterate over minibatchs
 for epoch in range(epoch_size):  # loop over the dataset multiple times
-    running_loss = 0.0
+    running_train_loss = 0.0
+    running_val_loss = 0.0
     for i, data in enumerate(train_dataloader,0):
+        ## training
+        # set model to train mode
+        net.train()
         # get the inputs; data is a list of [inputs, labels]
         inputs, labels = data
         # set on gpu
@@ -145,17 +162,36 @@ for epoch in range(epoch_size):  # loop over the dataset multiple times
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
-        # log the running loss
-        writer.add_scalar(
-            "training_loss", 
+        running_train_loss += loss.item()
+        # log the training loss
+        train_loss_writer.add_scalar(
+            "loss", 
             loss.item(),
             epoch*len(train_dataloader)+i,
-            )
-        # print statistics
-        running_loss += loss.item()
-        if i % 10 == 9:    # print every 100 mini-batches
-            print('[%d, %5d]: loss: %.3f' %(epoch + 1, i + 1, running_loss/10))
-            running_loss = 0.0
+            )        
+        ## randomly get one minibatch from val_dataloader
+        ## and eval with them
+        with torch.no_grad():
+            # get the inputs; data is a list of [inputs, labels]
+            inputs, labels = next(iter(val_dataloader))
+            # set on gpu
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            # forward + evaluation
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+            running_val_loss += loss.item()
+            # log the val loss
+            val_loss_writer.add_scalar(
+                "loss", 
+                loss.item(),
+                epoch*len(train_dataloader)+i,
+                )
+        ## print statistics
+        if i % print_step == print_step-1:    # print every 100 mini-batches
+            print('[%d, %4d]: train loss: %.3f, val loss: %0.3f' %(epoch + 1, i + 1, running_train_loss/print_step, running_val_loss/print_step))
+            running_train_loss = running_val_loss = 0.0
+        
 print('Finished Training')
-
-writer.close()
+train_loss_writer.close()
+val_loss_writer.close()
