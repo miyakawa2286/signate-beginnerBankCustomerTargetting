@@ -188,8 +188,9 @@ for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
                 roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
                 epoch*len(train_dataloader)+i,
                 )
-        #if i==0:
-
+        # write network graph
+        if i==0:
+            train_writer.add_graph(net, inputs)
         ## randomly get one minibatch from val_dataloader
         ## and eval with them
         with torch.no_grad():
