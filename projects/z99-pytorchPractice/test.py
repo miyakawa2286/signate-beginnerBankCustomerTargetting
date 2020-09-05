@@ -25,7 +25,7 @@ CLEAN_LOG = True
 EPOCH_SIZE = 5
 BATCH_SIZE = 256
 OPTIMIZER = 'adam'
-OPTIMIZER_LR = 0.1
+OPTIMIZER_LR = 0.01
 
 class MyNormalizer:
     '''
@@ -86,8 +86,12 @@ class Net(nn.Module):
         return x
 
 
-# load data
+# define path
 dpath_to_data = './data/raw/'
+dpath_to_logs = './projects/z99-pytorchPractice/logs'
+dpath_to_model = './projects/z99-pytorchPractice/models'
+
+# load data
 train, test, sub = read_dataset(dpath_to_data)
 features = [col for col in train if col!=TARGET]
 
@@ -140,9 +144,13 @@ elif OPTIMIZER=='adam':
 else:
     raise Exception(f'Not found {OPTIMIZER}')
 criterion = nn.BCELoss()
+# update path to seperately save logs
+dpath_to_logs = os.path.join(dpath_to_logs,f'{OPTIMIZER}_lr{OPTIMIZER_LR}')
+dpath_to_model = os.path.join(dpath_to_model,f'{OPTIMIZER}_lr{OPTIMIZER_LR}')
+if not os.path.exists(dpath_to_model):
+    os.makedirs(dpath_to_model, exist_ok=True)
 
 # tensorboard log writer
-dpath_to_logs = f'./projects/z99-pytorchPractice/logs/{OPTIMIZER}_lr{OPTIMIZER_LR}'
 if CLEAN_LOG:
     for sdir,_,files in os.walk(dpath_to_logs):
         if files:
@@ -150,8 +158,10 @@ if CLEAN_LOG:
                 os.remove(os.path.join(sdir,f))
 train_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'train'))
 val_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'val'))
+
 # define training parameters
 print_step = 10
+min_val_loss = np.inf
 #validation_step = int(len(train_dataloader)*0.1)
 # iterate over minibatchs
 for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
@@ -202,7 +212,12 @@ for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
             # forward + evaluation
             outputs = net(inputs)
             loss = criterion(outputs, labels)
-            running_val_loss += loss.item()
+            val_loss = loss.item()
+            running_val_loss += val_loss
+            # write parameters
+            if val_loss < min_val_loss:
+                torch.save(net.state_dict(), os.path.join(dpath_to_model,'model.pt'))
+                min_val_loss = val_loss 
             # write logs
             # loss
             val_writer.add_scalar(
@@ -221,6 +236,5 @@ for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
         if i % print_step == print_step-1:    # print every 100 mini-batches
             print('[%d, %4d]: train loss: %.3f, val loss: %0.3f' %(epoch + 1, i + 1, running_train_loss/print_step, running_val_loss/print_step))
             running_train_loss = running_val_loss = 0.0
-print('Finished Training')
 train_writer.close()
 val_writer.close()
