@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import category_encoders as ce
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score#, accuracy_score, precision_score, recall_score, f1_score
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -17,8 +18,11 @@ from torch.utils.tensorboard import SummaryWriter
 sys.path.append('./my_modules/')
 from utils import TARGET
 from utils import read_dataset
+from mls import get_evaluate
 
 CLEAN_LOG = True
+EPOCH_SIZE = 100
+BATCH_SIZE = 256
 
 
 class MyNormalizer:
@@ -111,13 +115,13 @@ train_dataset = MyDataset(X_train, y_train.to_list(), transform=nl)
 val_dataset = MyDataset(X_val, y_val.to_list(), transform=nl)
 train_dataloader = DataLoader(
     train_dataset, 
-    batch_size=64,
+    batch_size=BATCH_SIZE,
     shuffle=True,
     num_workers=0,
     )
 val_dataloader = DataLoader(
     val_dataset, 
-    batch_size=64,
+    batch_size=BATCH_SIZE,
     shuffle=True,
     num_workers=0,
     )
@@ -136,14 +140,13 @@ if CLEAN_LOG:
         if files:
             for f in files:
                 os.remove(os.path.join(sdir,f))
-train_loss_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'train-loss'))
-val_loss_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'val-loss'))
+train_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'train'))
+val_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'val'))
 # define training parameters
-epoch_size = 25
 print_step = 10
 #validation_step = int(len(train_dataloader)*0.1)
 # iterate over minibatchs
-for epoch in range(epoch_size):  # loop over the dataset multiple times
+for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
     running_train_loss = 0.0
     running_val_loss = 0.0
     for i, data in enumerate(train_dataloader,0):
@@ -163,12 +166,20 @@ for epoch in range(epoch_size):  # loop over the dataset multiple times
         loss.backward()
         optimizer.step()
         running_train_loss += loss.item()
-        # log the training loss
-        train_loss_writer.add_scalar(
-            "loss", 
+        # write logs
+        # loss
+        train_writer.add_scalar(
+            "Loss", 
             loss.item(),
             epoch*len(train_dataloader)+i,
-            )        
+            )
+        # auc
+        if not all(labels==0):
+            train_writer.add_scalar(
+                "AUC", 
+                roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                epoch*len(train_dataloader)+i,
+                )
         ## randomly get one minibatch from val_dataloader
         ## and eval with them
         with torch.no_grad():
@@ -181,17 +192,24 @@ for epoch in range(epoch_size):  # loop over the dataset multiple times
             outputs = net(inputs)
             loss = criterion(outputs, labels)
             running_val_loss += loss.item()
-            # log the val loss
-            val_loss_writer.add_scalar(
-                "loss", 
+            # write logs
+            # loss
+            val_writer.add_scalar(
+                "Loss", 
                 loss.item(),
                 epoch*len(train_dataloader)+i,
                 )
+            # auc
+            if not all(labels==0):
+                val_writer.add_scalar(
+                    "AUC", 
+                    roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                    epoch*len(train_dataloader)+i,
+                    )
         ## print statistics
         if i % print_step == print_step-1:    # print every 100 mini-batches
             print('[%d, %4d]: train loss: %.3f, val loss: %0.3f' %(epoch + 1, i + 1, running_train_loss/print_step, running_val_loss/print_step))
             running_train_loss = running_val_loss = 0.0
-        
 print('Finished Training')
-train_loss_writer.close()
-val_loss_writer.close()
+train_writer.close()
+val_writer.close()
