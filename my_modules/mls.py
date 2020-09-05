@@ -30,22 +30,38 @@ def get_evaluate(y_test, predict):
 
 
 def my_lgb_cross_validation(
-    params,
+    model_dict: dict,
     train,
     target,
     features,
+    res={},
     clf_threshold=0.5,
     ):
+    # init
     # build splitter
-    skf = StratifiedKFold(n_splits=5,
-                          shuffle=True,
-                          random_state=2020,
-                          )
+    skf = StratifiedKFold(
+        n_splits=5,
+        shuffle=True,
+        random_state=2020,
+        )
+    # set up result
+    if model_dict['name']=='lgb':
+        res = {
+            'eval': pd.DataFrame(),
+            'pred': train,
+            'feature_importance': pd.DataFrame(index=features),
+            'learning_history': {},
+            'model_dicts': {},
+        }
+    elif model_dict['name']=='mlp':
+        res = {
+            'eval': pd.DataFrame(),
+            'pred': train,
+        }
+    else:
+        raise Exception(f'Not found {model_dict["name"]}')
+
     # iterate over folds
-    eval_df = pd.DataFrame()
-    feature_importance_df = pd.DataFrame(index=features)
-    learning_history = {}
-    models = {}
     for i, (cv_train_index, cv_test_index) in enumerate(skf.split(train[features],train[target])):
         # set seed
         np.random.seed(i)
@@ -59,41 +75,43 @@ def my_lgb_cross_validation(
         local_train_index = np.random.choice(cv_train_index,local_train_size,replace=False)
         local_train = cv_train.iloc[cv_train.index.isin(local_train_index)]
         local_val = cv_train.iloc[~cv_train.index.isin(local_train_index)]
-        # make dataset
-        lgb_train = lgb.Dataset(local_train[features], local_train[target])
-        lgb_val = lgb.Dataset(local_val[features], local_val[target])
-        # training
-        evals_result = {}
-        clf = lgb.train(params=params,
-                        train_set=lgb_train,
-                        valid_sets=[lgb_val],
-                        valid_names=['val'],
-                        evals_result=evals_result,
-                        )
-        # save training result
-        feature_importance_df.loc[:,f'{i+1}th'] = clf.feature_importance(importance_type='gain')
-        learning_history[f'{i+1}th'] = evals_result
-        models[f'{i+1}th'] = clf
-        # prediction
-        predict_proba = clf.predict(cv_test[features], num_iteration=clf.best_iteration)
-        predict = [0 if i < clf_threshold else 1 for i in predict_proba]
-        # save prediction
-        train.loc[cv_test_index,'pred'] = predict_proba
-        # evaluation
-        auc, precision, recall = get_evaluate(cv_test[target].values,predict)
-        # save eval result
-        eval_df.loc[f'{i+1}th','auc'] = auc
-        eval_df.loc[f'{i+1}th','precision'] = precision
-        eval_df.loc[f'{i+1}th','recall'] = recall
-        eval_df.loc[f'{i+1}th','f'] = (2*precision*recall)/(recall+precision)
+        
+        if model_dict['name']=='lgb':
+            # make dataset
+            lgb_train = lgb.Dataset(local_train[features], local_train[target])
+            lgb_val = lgb.Dataset(local_val[features], local_val[target])
+            # training
+            evals_result = {}
+            clf = lgb.train(
+                params=model_dict['params'],
+                train_set=lgb_train,
+                valid_sets=[lgb_val],
+                valid_names=['val'],
+                evals_result=evals_result,
+                )
+            # save training result
+            res['feature_importance'].loc[:,f'{i+1}th'] = clf.feature_importance(importance_type='gain')
+            res['learning_history'][f'{i+1}th'] = evals_result
+            res['models'][f'{i+1}th'] = clf
+            # prediction
+            predict_proba = clf.predict(cv_test[features], num_iteration=clf.best_iteration)
+            predict = [0 if i < clf_threshold else 1 for i in predict_proba]
+            # save prediction
+            train.loc[cv_test_index,'pred'] = predict_proba
+        
+        elif model['name']=='mlp':
+            # make dataset
+            pass
+            # training
 
-    res = {
-        'eval': eval_df,
-        'pred': train,
-        'feature_importance': feature_importance_df,
-        'learning_history': learning_history,
-        'models': models,
-    }
+        # evaluation
+        auc, precision, recall = get_evaluate(cv_test[target].values, predict)
+        # save eval result
+        res['eval'].loc[f'{i+1}th','auc'] = auc
+        res['eval'].loc[f'{i+1}th','precision'] = precision
+        res['eval'].loc[f'{i+1}th','recall'] = recall
+        res['eval'].loc[f'{i+1}th','f'] = (2*precision*recall)/(recall+precision)
+
     return res
 
 
@@ -206,13 +224,13 @@ def my_stacking(
     main flow of stacking.
 
     '''
-    # stage 0
-    # preprocessing
-    train_,test_ = my_preprocessing(train,test)
-    # adversarial validation
-    train_ = adversarial_validation(train_,test_)
-    target = train_['Survived']
-    train_ = train_.drop('Survived',axis=1)
+    # # stage 0
+    # # preprocessing
+    # train_,test_ = my_preprocessing(train,test)
+    # # adversarial validation
+    # train_ = adversarial_validation(train_,test_)
+    # target = train_['Survived']
+    # train_ = train_.drop('Survived',axis=1)
     # scaling
     #nm = my_normalizer()
     #nm.fit(train_)
