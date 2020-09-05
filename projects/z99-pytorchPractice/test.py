@@ -21,9 +21,11 @@ from utils import read_dataset
 from mls import get_evaluate
 
 CLEAN_LOG = True
-EPOCH_SIZE = 100
-BATCH_SIZE = 256
 
+EPOCH_SIZE = 5
+BATCH_SIZE = 256
+OPTIMIZER = 'adam'
+OPTIMIZER_LR = 0.1
 
 class MyNormalizer:
     '''
@@ -83,6 +85,7 @@ class Net(nn.Module):
         x = torch.sigmoid(self.fc4(x))
         return x
 
+
 # load data
 dpath_to_data = './data/raw/'
 train, test, sub = read_dataset(dpath_to_data)
@@ -130,11 +133,16 @@ val_dataloader = DataLoader(
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(f'device: {device}')
 net = Net(inp_size=len(enc_features), out_size=1).to(device)
-optimizer = optim.SGD(net.parameters(), lr=0.01)
+if OPTIMIZER=='sgd':
+    optimizer = optim.SGD(net.parameters(), lr=OPTIMIZER_LR)
+elif OPTIMIZER=='adam':
+    optimizer = optim.Adam(net.parameters(), lr=OPTIMIZER_LR)
+else:
+    raise Exception(f'Not found {OPTIMIZER}')
 criterion = nn.BCELoss()
 
 # tensorboard log writer
-dpath_to_logs = './projects/z99-pytorchPractice/logs/'
+dpath_to_logs = f'./projects/z99-pytorchPractice/logs/{OPTIMIZER}_lr{OPTIMIZER_LR}'
 if CLEAN_LOG:
     for sdir,_,files in os.walk(dpath_to_logs):
         if files:
@@ -180,6 +188,8 @@ for epoch in range(EPOCH_SIZE):  # loop over the dataset multiple times
                 roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
                 epoch*len(train_dataloader)+i,
                 )
+        #if i==0:
+
         ## randomly get one minibatch from val_dataloader
         ## and eval with them
         with torch.no_grad():
