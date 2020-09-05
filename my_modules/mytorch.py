@@ -1,11 +1,12 @@
 import os
+import copy
 
 import pandas as pd
 import numpy as np
 from sklearn.metrics import roc_auc_score #, accuracy_score, precision_score, recall_score, f1_score
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -54,7 +55,7 @@ class MyDataset(Dataset):
 
 
 class Net(nn.Module):
-    def __init__(self,inp_size,out_size):
+    def __init__(self, inp_size, out_size):
         super(Net, self).__init__()
         self.fc1 = nn.Linear(inp_size, 32)
         self.bn1 = nn.BatchNorm1d(32)
@@ -74,16 +75,35 @@ class Net(nn.Module):
 
 def my_mlp_trainer(
     epoch_size: int,
+    batch_size: int,
     net,
     criterion,
     optimizer,
-    train_dataloader,
-    val_dataloader,
+    normalizer,
+    X_train: pd.core.frame.DataFrame,
+    y_train: pd.core.frame.DataFrame,
+    X_val: pd.core.series.Series,
+    y_val: pd.core.series.Series,
+    fpath_to_model_state_dict: str,
     train_writer,
     val_writer,
-    dpath_to_model: str,
     verbose: bool = False,
     ):
+    # make dataset and dataloader
+    train_dataset = MyDataset(X_train, y_train, transform=normalizer)
+    val_dataset = MyDataset(X_val, y_val, transform=normalizer)
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+    )
+    val_dataloader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,
+    )
     # define training parameters
     print_step = 10
     min_val_loss = np.inf
@@ -109,24 +129,27 @@ def my_mlp_trainer(
             optimizer.step()
             running_train_loss += loss.item()
             # write logs
-            # loss
-            train_writer.add_scalar(
-                "Loss", 
-                loss.item(),
-                epoch*len(train_dataloader)+i,
-                )
-            # auc
-            if not all(labels==0):
+            if not train_writer is None:
+                # loss
                 train_writer.add_scalar(
-                    "AUC", 
-                    roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                    "Loss", 
+                    loss.item(),
                     epoch*len(train_dataloader)+i,
                     )
-            # write network graph
-            if i==0:
-                train_writer.add_graph(net, inputs)
+                # auc
+                if not all(labels==0):
+                    train_writer.add_scalar(
+                        "AUC", 
+                        roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                        epoch*len(train_dataloader)+i,
+                        )
+                # write network graph
+                if i==0:
+                    train_writer.add_graph(net, inputs)
             ## randomly get one minibatch from val_dataloader
             ## and eval with them
+            # set model to eval model
+            net.eval()
             with torch.no_grad():
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = next(iter(val_dataloader))
@@ -140,28 +163,32 @@ def my_mlp_trainer(
                 running_val_loss += val_loss
                 # write parameters
                 if val_loss < min_val_loss:
-                    torch.save(net.state_dict(), os.path.join(dpath_to_model,'model.pt'))
+                    torch.save(net.state_dict(), fpath_to_model_state_dict)
                     min_val_loss = val_loss 
-                # write logs
-                # loss
-                val_writer.add_scalar(
-                    "Loss", 
-                    loss.item(),
-                    epoch*len(train_dataloader)+i,
-                    )
-                # auc
-                if not all(labels==0):
+                if not val_dataloader is None:
+                    # write logs
+                    # loss
                     val_writer.add_scalar(
-                        "AUC", 
-                        roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                        "Loss", 
+                        loss.item(),
                         epoch*len(train_dataloader)+i,
                         )
+                    # auc
+                    if not all(labels==0):
+                        val_writer.add_scalar(
+                            "AUC", 
+                            roc_auc_score(labels.to('cpu').detach().numpy(), outputs.to('cpu').detach().numpy()),
+                            epoch*len(train_dataloader)+i,
+                            )
             ## print statistics
             if verbose and i % print_step == print_step-1:    # print every 100 mini-batches
                 print('[%d, %4d]: train loss: %.3f, val loss: %0.3f' %(epoch + 1, i + 1, running_train_loss/print_step, running_val_loss/print_step))
                 running_train_loss = running_val_loss = 0.0
     train_writer.close()
     val_writer.close()
+
+    net.load_state_dict(torch.load(fpath_to_model_state_dict))
+    return net
 
 
 if __name__=='__main__':

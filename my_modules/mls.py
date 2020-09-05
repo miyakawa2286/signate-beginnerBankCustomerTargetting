@@ -15,27 +15,32 @@ from sklearn.model_selection import cross_val_predict
 import lightgbm as lgb
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
+import torch
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 sys.path.append('./my_modules/')
 from utils import LOCAL_TRAIN_RATIO
 from utils import plot_confusion_matrix
+from mytorch import DEVICE, MyDataset, MyNormalizer, my_mlp_trainer
 
 
-def get_evaluate(y_test, predict):
-    fpr, tpr, _ = metrics.roc_curve(y_test, predict)
+def get_evaluate(y_test, predict_proba, clf_threshold):
+    fpr, tpr, _ = metrics.roc_curve(y_test, predict_proba)
     auc = metrics.auc(fpr, tpr)
+    predict = [0 if i < clf_threshold else 1 for i in predict_proba]
     precision = metrics.precision_score(y_test, predict)
-    recall = metrics.recall_score(y_test, predict)      
+    recall = metrics.recall_score(y_test, predict)
     return auc, precision, recall
 
 
-def my_lgb_cross_validation(
-    model_dict: dict,
-    train,
-    target,
-    features,
-    res={},
-    clf_threshold=0.5,
+def my_cross_validation(
+    cv_conf: dict,
+    train: pd.DataFrame,
+    target: str,
+    features: list,
+    dpath_to_checkpoints: str,
+    verbose=True,
     ):
     # init
     # build splitter
@@ -44,8 +49,8 @@ def my_lgb_cross_validation(
         shuffle=True,
         random_state=2020,
         )
-    # set up result
-    if model_dict['name']=='lgb':
+    # setup result
+    if cv_conf['name']=='lgb':
         res = {
             'eval': pd.DataFrame(),
             'pred': train,
@@ -53,16 +58,18 @@ def my_lgb_cross_validation(
             'learning_history': {},
             'model_dicts': {},
         }
-    elif model_dict['name']=='mlp':
+    elif cv_conf['name']=='mlp':
         res = {
             'eval': pd.DataFrame(),
             'pred': train,
         }
     else:
-        raise Exception(f'Not found {model_dict["name"]}')
+        raise Exception(f'Not found {cv_conf["name"]}')
 
     # iterate over folds
     for i, (cv_train_index, cv_test_index) in enumerate(skf.split(train[features],train[target])):
+        if verbose:
+            print(f'{i+1}th fold')
         # set seed
         np.random.seed(i)
         # split data into cv train and test
@@ -76,14 +83,14 @@ def my_lgb_cross_validation(
         local_train = cv_train.iloc[cv_train.index.isin(local_train_index)]
         local_val = cv_train.iloc[~cv_train.index.isin(local_train_index)]
         
-        if model_dict['name']=='lgb':
+        if cv_conf['name']=='lgb':
             # make dataset
             lgb_train = lgb.Dataset(local_train[features], local_train[target])
             lgb_val = lgb.Dataset(local_val[features], local_val[target])
             # training
             evals_result = {}
             clf = lgb.train(
-                params=model_dict['params'],
+                params=cv_conf['params'],
                 train_set=lgb_train,
                 valid_sets=[lgb_val],
                 valid_names=['val'],
@@ -93,34 +100,77 @@ def my_lgb_cross_validation(
             res['feature_importance'].loc[:,f'{i+1}th'] = clf.feature_importance(importance_type='gain')
             res['learning_history'][f'{i+1}th'] = evals_result
             res['models'][f'{i+1}th'] = clf
-            # prediction
+            # gert prediction
             predict_proba = clf.predict(cv_test[features], num_iteration=clf.best_iteration)
-            predict = [0 if i < clf_threshold else 1 for i in predict_proba]
-            # save prediction
-            train.loc[cv_test_index,'pred'] = predict_proba
         
-        elif model['name']=='mlp':
-            # make dataset
-            pass
-            # training
-
+        elif cv_conf['name']=='mlp':
+            # reset net weights
+            if i==0:
+                fpath_to_init_weight = os.path.join(dpath_to_checkpoints,'init_weights.pt')
+                torch.save(cv_conf['training_params']['net'].state_dict(),fpath_to_init_weight)
+            else:
+                cv_conf['training_params']['net'].load_state_dict(torch.load(fpath_to_init_weight))
+            # build normalizer
+            nm = MyNormalizer()
+            nm.fit(local_train[features])
+            # build tensorboard log writer
+            dpath_to_logs = os.path.join(dpath_to_checkpoints,'logs',f'{i+1}th_fold')
+            for sdir,_,files in os.walk(dpath_to_logs):
+                if files:
+                    for f in files:
+                        os.remove(os.path.join(sdir,f))
+            train_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'train'))
+            val_writer = SummaryWriter(log_dir=os.path.join(dpath_to_logs,'val'))
+            # setup file path to model parameters
+            fpath_to_model_state_dict = os.path.join(dpath_to_checkpoints,'models',f'{i+1}th_model.pt')
+            if i==0:
+                parent = os.path.split(fpath_to_model_state_dict)[0]
+                if not os.path.exists(parent):
+                    os.makedirs(parent, exist_ok=True)
+            if os.path.exists(fpath_to_model_state_dict):
+                os.remove(fpath_to_model_state_dict)
+            # run training
+            net = my_mlp_trainer(
+                normalizer=nm,
+                X_train=local_train[features],
+                y_train=local_train[target],
+                X_val=local_val[features],
+                y_val=local_val[target],
+                fpath_to_model_state_dict=fpath_to_model_state_dict,
+                train_writer=train_writer,
+                val_writer=val_writer,
+                **cv_conf['training_params'],
+                )
+            # get prediction
+            net.eval()
+            with torch.no_grad():
+                test_batch = nm.transform(cv_test[features])
+                test_batch = torch.from_numpy(test_batch.values).float().to(DEVICE)
+                predict_proba = net(test_batch)
+                predict_proba = predict_proba.to('cpu').detach().numpy()
+        
+        # save prediction
+        train.loc[cv_test_index,'pred'] = predict_proba
         # evaluation
-        auc, precision, recall = get_evaluate(cv_test[target].values, predict)
+        auc, precision, recall = get_evaluate(cv_test[target].values, predict_proba, cv_conf['clf_threshold'])
         # save eval result
         res['eval'].loc[f'{i+1}th','auc'] = auc
         res['eval'].loc[f'{i+1}th','precision'] = precision
         res['eval'].loc[f'{i+1}th','recall'] = recall
         res['eval'].loc[f'{i+1}th','f'] = (2*precision*recall)/(recall+precision)
+        
+        train.loc[cv_test_index,'cv_fold'] = i+1
 
     return res
 
 
-def agg_cv_models(train,
-                  test,
-                  features,
-                  target,
-                  dpath_to_models,
-                  ):
+def agg_cv_models(
+    train,
+    test,
+    features,
+    target,
+    dpath_to_models,
+    ):
     # iterate over cv models
     cv_model_names = []
     for fpath_to_model in glob.glob(os.path.join(dpath_to_models,'*')):

@@ -50,29 +50,30 @@ def reduce_mem_usage(df, verbose=False):
     return df
 
 
-def read_dataset(dpath_to_dataset):
+def read_dataset(dpath_to_dataset, ver='raw'):
     train = reduce_mem_usage(pd.read_csv(os.path.join(dpath_to_dataset,'train.csv'),index_col='id'))
     test = reduce_mem_usage(pd.read_csv(os.path.join(dpath_to_dataset,'test.csv'),index_col='id'))
-    sub = reduce_mem_usage(pd.read_csv(os.path.join(dpath_to_dataset,'submit_sample.csv'),
-                                       header=None,
-                                       ))
+    sub = pd.read_csv('./data/raw/submit_sample.csv', header=None)
     return train,test,sub
 
 
 def make_submission(base_df,pred,dpath_to_output,filename=None):
     base_df[1] = pred
     filename = 'my_pred.csv' if filename is None else filename
-    base_df.to_csv(os.path.join(dpath_to_output,filename),
-                   index=False,
-                   header=None,
-                   )
+    base_df.to_csv(
+        os.path.join(dpath_to_output,filename),
+        index=False,
+        header=None,
+    )
 
 
-def plot_confusion_matrix(cm,
-                          target_names,
-                          title='Confusion matrix',
-                          cmap=None,
-                          normalize=True):
+def plot_confusion_matrix(
+    cm,
+    target_names,
+    title='Confusion matrix',
+    cmap=None,
+    normalize=True,
+    ):
     """
     given a sklearn confusion matrix (cm), make a nice plot
 

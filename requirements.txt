@@ -24,7 +24,7 @@ jupyter-client==6.1.6
 jupyter-core==4.6.3
 kiwisolver==1.2.0
 lazy-object-proxy==1.4.3
--e git+https://github.com/microsoft/LightGBM@33af069cc174a4c56c5f1e2f351196a284248f80#egg=lightgbm&subdirectory=python-package
+-e git+https://github.com/microsoft/LightGBM@ca066d499d4b58f74fbd7ab875855cb9f3cb07a1#egg=lightgbm&subdirectory=python-package
 llvmlite==0.34.0
 Markdown==3.2.2
 matplotlib==3.3.0
@@ -58,7 +58,9 @@ scikit-learn==0.23.2
 scipy==1.5.2
 seaborn==0.10.1
 six==1.15.0
+skorch==0.9.0
 statsmodels==0.12.0
+tabulate==0.8.7
 tensorboard==2.3.0
 tensorboard-plugin-wit==1.7.0
 threadpoolctl==2.1.0
